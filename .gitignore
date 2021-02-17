@@ -1,4 +1,6 @@
 /__pycache__/*
 /model/*.h5
 /mrcnn/__pycache__/*
-/.vscode/
+/.vscode/*
+/detected/*
+/upload/*
