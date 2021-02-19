@@ -1,5 +1,5 @@
 from typing import Optional, List
-from fastapi import FastAPI, File, UploadFile, Request, status
+from fastapi import FastAPI, File, UploadFile, Request, status, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.logger import logger
 from pydantic import BaseSettings
@@ -31,6 +31,8 @@ from mrcnn import model as modellib, utils
 
 origins = [
     "http://localhost:8080",
+    "http://127.0.0.1:8000",
+    "https://centrovision-ui.herokuapp.com"
 ]
 
 class Settings(BaseSettings):
@@ -150,50 +152,70 @@ def display_instances(image, boxes, ids):
     return image
 
 
+def verify_token(req: Request):
+    if 'authorization' in req.headers.keys():
+        token = req.headers["authorization"]
+        # Here your code for verifying the token or whatever you use
+        if token != 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9':
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized"
+            )
+        return True
+    else:
+        raise HTTPException(
+                status_code=401,
+                detail="No authorize header"
+            )
+
+
 @app.post("/image")
-async def predict_from_image(listFiles: List[UploadFile] = File(...)):
-    res = dict()
-    res['output'] = []
-    for file in listFiles:
-        file_name = file.filename
-        contents = await file.read()
-        nparr = np.fromstring(contents, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        save_upload(img, file_name)
-        r = detect_defect(img)
-        detected_img = display_instances(img, r['rois'], r['class_ids'])
-        save_detect(detected_img, file_name)
-        result = {
-            "image_name": file_name,
-            "total_detected": len(r['scores'])
-        }
-        result['detected']=[]
-        for i, _ in enumerate(r['scores']):
-            result['detected'].append({
-                "class_name" : class_names[r['class_ids'][i]],
-                "rois" : r['rois'][i].tolist(),
-            })
-        res['output'].append(result)
-    print(res)
-    return res
+async def predict_from_image(listFiles: List[UploadFile] = File(...), authorized: bool = Depends(verify_token)):
+    if authorized:
+        res = dict()
+        res['output'] = []
+        for file in listFiles:
+            file_name = file.filename
+            contents = await file.read()
+            nparr = np.fromstring(contents, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            save_upload(img, file_name)
+            r = detect_defect(img)
+            detected_img = display_instances(img, r['rois'], r['class_ids'])
+            save_detect(detected_img, file_name)
+            result = {
+                "image_name": file_name,
+                "total_detected": len(r['scores'])
+            }
+            result['detected']=[]
+            for i, _ in enumerate(r['scores']):
+                result['detected'].append({
+                    "class_name" : class_names[r['class_ids'][i]],
+                    "rois" : r['rois'][i].tolist(),
+                })
+            res['output'].append(result)
+        print(res)
+        return res
 
 @app.get("/download/image")
-async def download_detected(img_name: str):
-    filename = f"detected/{img_name}"
-    print(img_name)
-    if os.path.isfile(filename):
-        return FileResponse(filename,media_type='application/octet-stream',filename=f'detected.jpg')
-    else:
-        return {"Error":"File not found"}
+async def download_detected(img_name: str, authorized: bool = Depends(verify_token)):
+    if authorized:
+        filename = f"detected/{img_name}"
+        print(img_name)
+        if os.path.isfile(filename):
+            return FileResponse(filename,media_type='application/octet-stream',filename=f'detected.jpg')
+        else:
+            return {"Error":"File not found"}
 
 @app.get("/get-image")
-async def get_image(img_name: str):
-    filename = f"detected/{img_name}"
-    img = cv2.imread(filename)
-    h,w = img.shape[0], img.shape[1]
-    img = cv2.resize(img, (1100, int(1100/w * h)))
-    retval, buffer = cv2.imencode('.jpg', img)
-    jpg_as_text = base64.b64encode(buffer)
-    return {"image":jpg_as_text}
+async def get_image(img_name: str, authorized: bool = Depends(verify_token)):
+    if authorized:
+        filename = f"detected/{img_name}"
+        img = cv2.imread(filename)
+        h,w = img.shape[0], img.shape[1]
+        img = cv2.resize(img, (1100, int(1100/w * h)))
+        retval, buffer = cv2.imencode('.jpg', img)
+        jpg_as_text = base64.b64encode(buffer)
+        return {"image":jpg_as_text}
     
     
